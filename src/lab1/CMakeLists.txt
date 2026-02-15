@@ -28,14 +28,10 @@ ament_python_install_package(${PROJECT_NAME})
 # Install Python executables
 install(PROGRAMS
   scripts/dummy_script.py
-  scripts/kalman_filter.py
   scripts/icp.py
   scripts/compair.py
   scripts/ekf.py
-  scripts/run.py
   scripts/path_logger.py
-  scripts/slam_compair.py
-  scripts/new.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
