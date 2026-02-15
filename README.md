@@ -453,7 +453,12 @@ The time series plot shows X, Y position and heading (Theta) over time:
 ![Sequence 00 SLAM Map](seq0/seq0_map.png)
 
 **ICP Odometry Map with Trajectories:**
+
 ![Sequence 00 ICP Map](seq0/seq0_icpmap.png)
+
+- 🟣 **Purple:** Raw Odometry
+- 🔴 **Red:** ICP Odometry 
+- 🟢 **Green:** EKF
 
 The ICP map overlay shows all trajectories plotted on the accumulated point cloud. Red trajectory (SLAM) closely follows the map structure, while purple (EKF) shows significant deviation, especially in the lower portion where heading errors compound into position drift.
 
@@ -509,8 +514,13 @@ Unlike previous results where EKF degraded performance, the updated implementati
 
 ![Sequence 01 SLAM Map](seq1/seq1_map.png)
 
-**ICP Odometry Map with Trajectories:**
+**ICP Odometry Map with Trajectories:**(Purple : 
+
 ![Sequence 01 ICP Map](seq1/seq1_icpmap.png)
+
+- 🟣 **Purple:** Raw Odometry
+- 🔴 **Red:** ICP Odometry 
+- 🟢 **Green:** EKF
 
 The ICP map clearly shows the trajectory divergence: purple (EKF) stays close to red (SLAM), while the Raw Odometry trajectory (not shown, but implied by EKF without IMU) would deviate significantly to the left side of the map.
 
@@ -570,7 +580,12 @@ The time series for smooth motion sequence shows:
 ![Sequence 02 SLAM Map](seq2/seq2_map.png)
 
 **ICP Odometry Map with Trajectories:**
+
 ![Sequence 02 ICP Map](seq2/seq2_icpmap.png)
+
+- 🟣 **Purple:** Raw Odometry
+- 🔴 **Red:** ICP Odometry 
+- 🟢 **Green:** EKF
 
 The ICP map shows trajectory accuracy: green (ICP) and red (SLAM) overlap closely, while purple (EKF) shows moderate deviation. The point cloud quality is excellent due to smooth motion, with clear wall structures visible.
 
