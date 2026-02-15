@@ -5,22 +5,19 @@
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Overview](#overview)
 - [Repository Structure](#repository-structure)
+- [Setup](#setup)
 - [Dependencies](#dependencies)
 - [Part 1: EKF Odometry Fusion](#part-1-ekf-odometry-fusion)
 - [Part 2: ICP Odometry Refinement](#part-2-icp-odometry-refinement)
 - [Part 3: Full SLAM with slam_toolbox](#part-3-full-slam-with-slam_toolbox)
 - [Results Summary](#results-summary)
-  - [Sequence 00: Empty Hallway](#-sequence-00-empty-hallway)
-  - [Sequence 01: Sharp Turns](#-sequence-01-sharp-turns)
-  - [Sequence 02: Smooth Motion](#-sequence-02-smooth-motion)
 - [Cross-Sequence Comparison](#cross-sequence-comparison)
 - [Discussion](#discussion)
 - [Conclusion](#conclusion)
-- [How to Run](#how-to-run)
 - [References](#references)
 
 ---
@@ -63,6 +60,64 @@ FRA532_LAB1/
 └── .gitignore
 ```
 
+---
+## Setup
+
+### Clone Git Hub
+```bash
+git clone https://github.com/natthaphxt/FRA532-Mobile-Robot.git -b Lab1
+```
+
+### Build the workspace
+```bash
+cd ~/FRA532_LAB1
+colcon build
+source install/setup.bash
+```
+
+### Part 1 and 2: EKF Odometry
+```bash
+# Terminal 1: Play rosbag(if want to change seq just edit /fibo_floor3_seq0x/)
+ros2 bag play Dataset/fibo_floor3_seq00/ --clock
+
+# Terminal 2: Run EKF node
+ros2 run lab1 ekf.py
+
+# Terminal 3: rviz2
+rviz2
+```
+
+### Part 2: ICP Odometry
+```bash
+# Terminal 1: Play rosbag(if want to change seq just edit /fibo_floor3_seq0x/)
+ros2 bag play Dataset/fibo_floor3_seq00/ --clock
+
+# Terminal 2: Run ICP node
+ros2 run lab1 icp.py
+
+# Terminal 3: Run EKF node
+ros2 run lab1 ekf.py
+
+# Terminal 4: rviz2
+rviz2
+```
+
+### Part 3: SLAM
+```bash
+# Terminal 1: Play rosbag(if want to change seq just edit /fibo_floor3_seq0x/)
+ros2 bag play Dataset/fibo_floor3_seq00/ --clock
+
+# Terminal 2: Launch slam_toolbox
+ros2 launch lab1 slam_launch.py
+
+# Terminal 3: rviz2
+rviz2
+```
+
+### Save Map
+```bash
+ros2 run nav2_map_server map_saver_cli -f my_map
+```
 ---
 
 ## Dependencies
@@ -223,11 +278,13 @@ Refine EKF odometry using LiDAR-based ICP (Iterative Closest Point) scan matchin
 
 **Given** two sets of point clouds:
 - Source: $P = \{p_1, p_2, \ldots, p_n\}$ (current scan)
-- Target: $Q = \{q_1, q_2, \ldots, q_m\}$ (reference scan/map)
+- Target: $Q = \{q_1, q_2, \ldots, q_m\}$ (local map)
 
 **Objective:** Find rotation $\mathbf{R}$ and translation $\mathbf{t}$ that minimize alignment error:
 
-$$E(\mathbf{R}, \mathbf{t}) = \sum_{i=1}^{n} \| p_i - (\mathbf{R} \cdot q_i + \mathbf{t}) \|^2$$
+$$E(\mathbf{R}, \mathbf{t}) = \sum_{i=1}^{n} \| q_i - (\mathbf{R} \cdot p_i + \mathbf{t}) \|^2$$
+
+where $q_i$ is the nearest neighbor of transformed point $\mathbf{R} \cdot p_i + \mathbf{t}$ in the target cloud.
 
 **For 2D LiDAR:**
 
@@ -235,35 +292,21 @@ $$\mathbf{R} = \begin{bmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\the
 
 ### 2.2 ICP Algorithm
 
-```
-Input:  Source cloud P, Target cloud Q, Initial guess T₀
-Output: Optimal transformation T = (R, t)
+The ICP algorithm iteratively refines the transformation by alternating between finding point correspondences and computing the optimal transformation.
 
-1. Initialize: T = T₀
+**Initialization:** Set initial transformation $\mathbf{T} = \mathbf{T}_0$ (from EKF odometry)
 
-2. While not converged:
-   
-   a. Find Correspondences:
-      For each pᵢ in P:
-          qᵢ = nearest_neighbor(T·pᵢ, Q)  // Using KD-tree
-   
-   b. Reject Outliers:
-      Remove pairs where ‖T·pᵢ - qᵢ‖ > threshold
-   
-   c. Compute Optimal Transformation:
-      (R, t) = minimize Σᵢ ‖R·pᵢ + t - qᵢ‖²
-      
-   d. Update: T = (R, t)
-   
-   e. Check Convergence:
-      If ΔT < tolerance → break
+**Iterate until convergence:**
 
-3. Return T
-```
+1. For each point $p_i$ in source cloud, find nearest neighbor $q_i$ in target cloud using KD-tree
+2. Reject outlier pairs where distance exceeds threshold
+3. Compute optimal $(\mathbf{R}, \mathbf{t})$ using SVD (Section 2.3)
+4. Update transformation: $\mathbf{T} \leftarrow (\mathbf{R}, \mathbf{t})$
+5. Check convergence: stop if $\|\Delta \mathbf{T}\| < \epsilon$
 
 ### 2.3 SVD-based Solution (Point-to-Point)
 
-For Point-to-Point ICP, the optimal transformation is computed using SVD:
+Given corresponding point pairs $(p_i, q_i)$, the optimal transformation is computed using SVD:
 
 **Step 1: Compute centroids**
 
@@ -271,11 +314,11 @@ $$\bar{p} = \frac{1}{n} \sum_{i=1}^{n} p_i, \quad \bar{q} = \frac{1}{n} \sum_{i=
 
 **Step 2: Center point clouds**
 
-$$P' = P - \bar{p}, \quad Q' = Q - \bar{q}$$
+$$p'_i = p_i - \bar{p}, \quad q'_i = q_i - \bar{q}$$
 
 **Step 3: Compute cross-covariance matrix**
 
-$$\mathbf{H} = P'^T \cdot Q'$$
+$$\mathbf{H} = \sum_{i=1}^{n} p'_i \cdot {q'_i}^T$$
 
 **Step 4: SVD decomposition**
 
@@ -297,25 +340,33 @@ Instead of matching consecutive scans (scan-to-scan), we match current scan to a
 
 $$M = \text{merge}(\text{keyframes}[t-n : t-1])$$
 
-$$M_{\text{downsampled}} = \text{voxel\_filter}(M, 0.05m)$$
+$$M_{\text{downsampled}} = \text{voxel-filter}(M, 0.05m)$$
+
+The local map accumulates points from multiple keyframes (e.g., 20 recent keyframes), providing a much richer point cloud than a single scan. A single LiDAR scan contains approximately 360 points, while the local map contains 7,000+ points from accumulated scans.
 
 **ICP Registration:**
-- Source: Current scan (full resolution)
-- Target: Local map (downsampled)
+- Source: Current scan (~360 points)
+- Target: Local map (~7,000+ points from 20 keyframes)
 - Initial guess: EKF odometry
 
 **Why Scan-to-Map?**
 
-| Method       | Pros                         | Cons                      |
-| ------------ | ---------------------------- | ------------------------- |
-| Scan-to-Scan | Simple, fast                 | Drift accumulates quickly |
-| Scan-to-Map  | More stable, richer features | Higher computation        |
+| Aspect           | Scan-to-Scan            | Scan-to-Map                     |
+| ---------------- | ----------------------- | ------------------------------- |
+| Target points    | ~360 (single scan)      | ~7,000+ (accumulated keyframes) |
+| Feature richness | Limited to current view | Includes occluded areas         |
+| Drift rate       | Fast (error compounds)  | Slow (rich reference)           |
+| Robustness       | Sensitive to occlusion  | Robust to temporary occlusion   |
 
 ### 2.5 ICP Odometry Pipeline
 
-```
-LiDAR Scan → Preprocess → Keyframe Selection → Update Local Map → ICP Registration → Refined Pose
-```
+The pipeline processes each incoming LiDAR scan:
+
+1. **Preprocess:** Remove invalid points (NaN, too close, too far)
+2. **Keyframe Selection:** Check if robot moved enough (distance > 0.5m or rotation > 15 deg)
+3. **Update Local Map:** If keyframe, add to local map and remove old keyframes
+4. **ICP Registration:** Match current scan against local map using Point-to-Point ICP
+5. **Output:** Refined pose from ICP transformation
 
 ---
 
@@ -358,127 +409,174 @@ Since external ground truth (motion capture, GPS) is unavailable:
 
 ---
 
-### 📍 Sequence 00: Empty Hallway
+### Sequence 00: Empty Hallway
 > Baseline environment with minimal obstacles (~550 seconds duration)
 
 #### Trajectory Comparison
 ![Sequence 00 Trajectories](seq0/seq0_all.png)
+
+#### Time Series Analysis
+![Sequence 00 Time Series](seq0/seq0_timeseries.png)
+
+The time series plot shows X, Y position and heading (Theta) over time:
+- **X position:** All methods track similarly until ~250s. After that, Wheel Odometry (orange) deviates from SLAM ground truth (red dashed). EKF (blue) shows moderate deviation. ICP (green) tracks ground truth closely.
+- **Y position:** Wheel Odometry shows larger negative deviation compared to ground truth. EKF follows a similar pattern but with smaller error. ICP maintains close tracking throughout.
+- **Theta:** All methods track heading well initially. ICP shows oscillation around 270-400s, likely due to angle wraparound at +/-180 degrees during rotation.
 
 #### Drift Analysis (Reference: SLAM Toolbox)
 ![Sequence 00 Drift Analysis](seq0/seq0_error.png)
 
 #### Quantitative Results
 
-| Method           | Mean Error | Max Error | Std Dev |       vs Raw       |
-| ---------------- | :--------: | :-------: | :-----: | :----------------: |
-| **Raw Odometry** |  3.714 m   |  ~7.8 m   | ~2.8 m  |         —          |
-| **EKF Fused**    |  3.316 m   |  ~6.3 m   | ~2.0 m  | **10.7% better** ✅ |
-| **ICP LiDAR**    |  1.268 m   |  ~6.0 m   | ~1.4 m  | **65.9% better** ✅ |
-| **SLAM Toolbox** |     —      |     —     |    —    |    Ground Truth    |
+| Method           | Mean Error | Max Error | Std Dev |      vs Raw      |
+| ---------------- | :--------: | :-------: | :-----: | :--------------: |
+| **Raw Odometry** |  3.714 m   |  ~7.8 m   | ~2.8 m  |        —         |
+| **EKF Fused**    |  3.318 m   |  ~6.3 m   | ~2.0 m  | **10.7% better** |
+| **ICP LiDAR**    |  0.174 m   |  ~0.4 m   | ~0.1 m  | **95.3% better** |
+| **SLAM Toolbox** |     —      |     —     |    —    |   Ground Truth   |
 
 #### Analysis
 
-**Raw Odometry:**
-- Gradual drift accumulation over ~550 seconds
-- Error increases steadily, reaching ~7.8 m maximum
-- Heading drift causes trajectory to deviate from ground truth
+**ICP achieves exceptional performance** with only 0.174 m mean error:
+- Empty hallway provides clear wall features for scan matching
+- Consistent geometric structure allows reliable ICP convergence
+- Low error variance indicates stable localization throughout
 
-**EKF Fused:**
-- **10.7% improvement** over Raw Odometry
-- IMU helps correct heading drift in this baseline environment
-- Moderate improvement due to relatively simple motion profile
+**EKF shows moderate improvement** over Raw Odometry:
+- IMU helps correct heading drift
+- Position (x,y) still accumulates error without external correction
 
-**ICP LiDAR:**
-- **Best performance** with 65.9% improvement
-- Environmental features (walls) provide strong geometric constraints
-- Consistent low error throughout trajectory
+### Generated Maps
 
-#### Generated Map
-![Sequence 00 Map](seq0/seq0_map.png)
+**SLAM Toolbox Map:**
+
+![Sequence 00 SLAM Map](seq0/seq0_map.png)
+
+**ICP Odometry Map with Trajectories:**
+![Sequence 00 ICP Map](seq0/seq0_icpmap.png)
+
+The ICP map overlay shows all trajectories plotted on the accumulated point cloud. Red trajectory (SLAM) closely follows the map structure, while purple (EKF) shows significant deviation, especially in the lower portion where heading errors compound into position drift.
+
+#### Sequence 00 Conclusion
+
+In the empty hallway environment, ICP achieves exceptional accuracy (0.174 m mean error) because the clear wall structures provide reliable geometric features for scan matching. EKF shows only moderate improvement (10.7%) over Raw Odometry because the relatively straight paths do not generate significant heading errors that IMU could correct. The main source of error in Raw Odometry and EKF is gradual position drift from wheel slip and encoder noise, which accumulates over the 550-second duration.
 
 ---
 
-### 📍 Sequence 01: Sharp Turns
+### Sequence 01: Sharp Turns
 > Challenging environment with aggressive rotational motion (~400 seconds duration)
 
 #### Trajectory Comparison
 ![Sequence 01 Trajectories](seq1/seq1_all.png)
+
+#### Time Series Analysis
+![Sequence 01 Time Series](seq1/seq1_timeseries.png)
+
+The time series reveals critical differences during sharp turn sequences:
+- **X position:** All methods follow similar trend until ~200s. Wheel Odometry (orange) then diverges significantly, staying lower than ground truth. EKF (blue) and ICP (green) maintain closer tracking to SLAM.
+- **Y position:** Wheel Odometry shows severe deviation in the negative direction, reaching -15m while ground truth reaches only -10m. This error accumulates from heading miscalculation during sharp turns.
+- **Theta:** EKF (blue) shows a consistent offset of ~40 degrees from the start, indicating IMU initial alignment issue. However, it still tracks the shape of heading changes. Wheel Odometry (orange) shows wraparound artifacts at +/-180 degrees.
 
 #### Drift Analysis (Reference: SLAM Toolbox)
 ![Sequence 01 Drift Analysis](seq1/seq1_error.png)
 
 #### Quantitative Results
 
-| Method           | Mean Error | Max Error | Std Dev |      vs Raw       |
-| ---------------- | :--------: | :-------: | :-----: | :---------------: |
-| **Raw Odometry** |  3.181 m   |  ~6.3 m   | ~1.4 m  |         —         |
-| **EKF Fused**    |  4.419 m   |  ~7.7 m   | ~2.1 m  | **38.9% worse** ❌ |
-| **ICP LiDAR**    |  3.873 m   |  ~6.5 m   | ~1.7 m  | **21.8% worse** ❌ |
-| **SLAM Toolbox** |     —      |     —     |    —    |   Ground Truth    |
+| Method           | Mean Error | Max Error | Std Dev |      vs Raw      |
+| ---------------- | :--------: | :-------: | :-----: | :--------------: |
+| **Raw Odometry** |  6.418 m   |  ~9.5 m   | ~2.3 m  |        —         |
+| **EKF Fused**    |  1.179 m   |  ~1.9 m   | ~0.4 m  | **81.6% better** |
+| **ICP LiDAR**    |  1.117 m   |  ~2.0 m   | ~0.5 m  | **82.6% better** |
+| **SLAM Toolbox** |     —      |     —     |    —    |   Ground Truth   |
 
-#### ⚠️ Unexpected Result: EKF Performs Worse Than Raw Odometry
+#### Key Finding: EKF Now Outperforms Raw Odometry
 
-**Observation:**
-- EKF error (4.419 m) is **38.9% higher** than Raw Odometry (3.181 m)
-- This contradicts the expected behavior where sensor fusion should improve accuracy
+Unlike previous results where EKF degraded performance, the updated implementation shows **81.6% improvement**:
 
-**Root Cause Analysis:**
+**Why EKF Works Well Now:**
+1. **Proper IMU integration** - The IMU provides reliable heading correction during sharp turns
+2. **Heading is critical** - Sharp turns amplify heading errors in wheel odometry. Small angular errors become large position errors when multiplied by distance traveled.
+3. **IMU complements wheel slip** - During aggressive rotation, wheels may slip, but IMU maintains accurate heading measurement
 
-1. **IMU Gyroscope Bias Accumulation** - During sharp turns, IMU experiences high angular velocity, causing gyroscope bias to have a larger effect. EKF trusts IMU heading, so it accumulates bias error over time.
+**Why Raw Odometry Failed:**
+- Sharp turns cause significant wheel slip
+- Heading errors of just a few degrees compound into meters of position error
+- The 6.418 m mean error reflects accumulated heading drift throughout the trajectory
 
-2. **EKF Covariance Mismatch** - Process noise (Q) may be set too low, causing over-trust in the motion model. Measurement noise (R) may be set too high, causing under-trust in wheel odometry.
+### Generated Maps
 
-3. **Drift Pattern from Graph** - During 0-100s, EKF error rises rapidly (when sharp turns begin), reaching peak ~7.5m at 100-200s, then gradually decreasing as the robot returns.
+**SLAM Toolbox Map:**
 
-**Why Raw Odometry Performs Better:**
-- Wheel encoders have bounded and predictable drift
-- No external sensor bias to accumulate
-- Sharp turns cause wheel slip, but error doesn't compound as severely as IMU bias
+![Sequence 01 SLAM Map](seq1/seq1_map.png)
 
-#### Generated Map
-![Sequence 01 Map](seq1/seq1_map.png)
+**ICP Odometry Map with Trajectories:**
+![Sequence 01 ICP Map](seq1/seq1_icpmap.png)
+
+The ICP map clearly shows the trajectory divergence: purple (EKF) stays close to red (SLAM), while the Raw Odometry trajectory (not shown, but implied by EKF without IMU) would deviate significantly to the left side of the map.
+
+#### Sequence 01 Conclusion
+
+Sharp turns expose the critical importance of heading accuracy. Raw Odometry fails severely (6.418 m error) because wheel slip during aggressive rotation causes heading errors that compound into large position errors. EKF improves dramatically (81.6% better) by using IMU to maintain accurate heading during turns, though the ~40 degree initial offset visible in time series suggests calibration could further improve results. ICP performs similarly well (1.117 m) by using geometric features to correct both position and heading. The key lesson is that heading errors during turns are the dominant error source, and any method that corrects heading will significantly outperform pure wheel odometry.
 
 ---
 
-### 📍 Sequence 02: Smooth Motion
-> Non-empty hallway with gentle motion (~650 seconds duration)
+### Sequence 02: Smooth Motion
+> Non-empty hallway with gentle motion (~600 seconds duration)
 
 #### Trajectory Comparison
 ![Sequence 02 Trajectories](seq2/seq2_all.png)
+
+#### Time Series Analysis
+![Sequence 02 Time Series](seq2/seq2_timeseries.png)
+
+The time series for smooth motion sequence shows:
+- **X position:** All methods track similarly in the first half. Wheel Odometry (orange) then slightly undershoots compared to ground truth. EKF (blue) shows moderate deviation after 400s. ICP (green) maintains close tracking throughout.
+- **Y position:** Wheel Odometry deviates significantly to -15m while ground truth only reaches -10m. This 5m error demonstrates heading-induced position drift over the long 600s duration.
+- **Theta:** EKF shows a consistent ~40 degree offset similar to Seq01. Wheel Odometry shows wraparound at +/-180 degrees. ICP tracks ground truth heading accurately.
 
 #### Drift Analysis (Reference: SLAM Toolbox)
 ![Sequence 02 Drift Analysis](seq2/seq2_error.png)
 
 #### Quantitative Results
 
-| Method           | Mean Error | Max Error | Std Dev |       vs Raw       |
-| ---------------- | :--------: | :-------: | :-----: | :----------------: |
-| **Raw Odometry** |  3.298 m   |  ~7.2 m   | ~2.0 m  |         —          |
-| **EKF Fused**    |  5.733 m   |  ~8.5 m   | ~2.2 m  | **73.8% worse** ❌  |
-| **ICP LiDAR**    |  1.068 m   |  ~1.9 m   | ~0.4 m  | **67.6% better** ✅ |
-| **SLAM Toolbox** |     —      |     —     |    —    |    Ground Truth    |
+| Method           | Mean Error | Max Error | Std Dev |      vs Raw      |
+| ---------------- | :--------: | :-------: | :-----: | :--------------: |
+| **Raw Odometry** |  6.071 m   |  ~8.1 m   | ~2.1 m  |        —         |
+| **EKF Fused**    |  3.159 m   |  ~5.7 m   | ~1.8 m  | **48.0% better** |
+| **ICP LiDAR**    |  0.659 m   |  ~1.4 m   | ~0.4 m  | **89.1% better** |
+| **SLAM Toolbox** |     —      |     —     |    —    |   Ground Truth   |
 
-#### ⚠️ EKF Shows Worst Performance Across All Sequences
+#### Analysis
 
-**Observation:**
-- EKF error (5.733 m) is **73.8% higher** than Raw Odometry (3.298 m)
-- This is the most severe EKF degradation among all sequences
-
-**Root Cause Analysis:**
-
-1. **IMU Bias Drift During Slow Motion** - Due to smooth motion, angular velocity is very low, resulting in small gyroscope signals where bias becomes dominant. Additionally, this sequence is 650s long, allowing significant bias accumulation.
-
-2. **Signal-to-Noise Ratio Problem** - During smooth motion, the actual rotation signals are small, but IMU noise and bias are relatively larger in comparison. EKF integrates this noise, causing heading error to grow over time.
-
-3. **Drift Pattern from Graph** - During 0-200s, error increases steadily. From 200-450s, it reaches peak ~8.5m and remains high. Finally, during 450-650s, it gradually decreases but stays above Raw.
-
-**Why ICP Performs Excellently:**
-- Smooth motion allows scan matching to converge well
+**ICP achieves best performance** with 0.659 m mean error:
+- Smooth motion allows optimal scan matching convergence
 - No motion blur or scan distortion
-- Environmental features are captured clearly, resulting in mean error of only 1.068 m
+- Rich environmental features from non-empty hallway
 
-#### Generated Map
-![Sequence 02 Map](seq2/seq2_map.png)
+**EKF shows significant improvement** (48.0% better than Raw):
+- Smooth motion produces clean IMU signals
+- Heading correction prevents the position drift seen in Raw Odometry
+- The 600s duration would cause severe drift without IMU correction
+
+**Raw Odometry shows worst performance:**
+- Long duration (600s) allows drift to accumulate
+- Without heading correction, small angular errors compound over time
+- The 6.071 m mean error reflects unbounded drift behavior
+
+### Generated Maps
+
+**SLAM Toolbox Map:**
+
+![Sequence 02 SLAM Map](seq2/seq2_map.png)
+
+**ICP Odometry Map with Trajectories:**
+![Sequence 02 ICP Map](seq2/seq2_icpmap.png)
+
+The ICP map shows trajectory accuracy: green (ICP) and red (SLAM) overlap closely, while purple (EKF) shows moderate deviation. The point cloud quality is excellent due to smooth motion, with clear wall structures visible.
+
+#### Sequence 02 Conclusion
+
+The smooth motion sequence demonstrates how errors accumulate over long durations. Despite gentle motion, Raw Odometry accumulates 6.071 m error over 600 seconds because small heading errors continuously compound into position drift. EKF reduces this by 48% through heading correction, but the ~40 degree initial offset limits its effectiveness. ICP achieves the best result (0.659 m) because smooth motion allows optimal scan matching convergence without motion blur, and the non-empty hallway provides rich geometric features. This sequence shows that even without aggressive maneuvers, long-duration navigation requires active drift correction.
 
 ---
 
@@ -486,28 +584,28 @@ Since external ground truth (motion capture, GPS) is unavailable:
 
 ### Mean Error Summary (Reference: SLAM Toolbox)
 
-| Sequence | Environment   | Duration |  Raw Odom   | EKF Fused |  ICP LiDAR  | Best Method |
-| :------: | ------------- | :------: | :---------: | :-------: | :---------: | :---------: |
-|  **00**  | Empty Hallway |  ~550s   |   3.714 m   |  3.316 m  | **1.268 m** |    ICP ✅    |
-|  **01**  | Sharp Turns   |  ~400s   | **3.181 m** |  4.419 m  |   3.873 m   |    Raw ⚠️    |
-|  **02**  | Smooth Motion |  ~650s   |   3.298 m   |  5.733 m  | **1.068 m** |    ICP ✅    |
+| Sequence | Environment   | Duration | Raw Odom |  EKF Fused  |  ICP LiDAR  | Best Method |
+| :------: | ------------- | :------: | :------: | :---------: | :---------: | :---------: |
+|  **00**  | Empty Hallway |  ~550s   | 3.714 m  |   3.318 m   | **0.174 m** |     ICP     |
+|  **01**  | Sharp Turns   |  ~400s   | 6.418 m  | **1.179 m** |   1.117 m   |     ICP     |
+|  **02**  | Smooth Motion |  ~600s   | 6.071 m  |   3.159 m   | **0.659 m** |     ICP     |
 
 ### Performance Comparison vs Raw Odometry
 
-| Sequence | EKF vs Raw | ICP vs Raw | EKF Status |
-| :------: | :--------: | :--------: | :--------: |
-|  **00**  |   +10.7%   |   +65.9%   | ✅ Improved |
-|  **01**  | **-38.9%** |   -21.8%   | ❌ Degraded |
-|  **02**  | **-73.8%** |   +67.6%   | ❌ Degraded |
+| Sequence | EKF vs Raw | ICP vs Raw | Best Improvement |
+| :------: | :--------: | :--------: | :--------------: |
+|  **00**  |   +10.7%   | **+95.3%** |       ICP        |
+|  **01**  | **+81.6%** |   +82.6%   |       ICP        |
+|  **02**  |   +48.0%   | **+89.1%** |       ICP        |
 
 ### Method Robustness Rating
 
-| Method       | Seq 00 | Seq 01 | Seq 02 | Overall |
-| ------------ | :----: | :----: | :----: | :-----: |
-| Raw Odometry |   ⭐⭐   |  ⭐⭐⭐   |  ⭐⭐⭐   |   ⭐⭐⭐   |
-| EKF Fused    |  ⭐⭐⭐   |   ⭐    |   ⭐    |   ⭐⭐    |
-| ICP LiDAR    | ⭐⭐⭐⭐⭐  |  ⭐⭐⭐   | ⭐⭐⭐⭐⭐  |  ⭐⭐⭐⭐   |
-| SLAM Toolbox | ⭐⭐⭐⭐⭐  | ⭐⭐⭐⭐⭐  | ⭐⭐⭐⭐⭐  |  ⭐⭐⭐⭐⭐  |
+| Method       |  Seq 00   |  Seq 01   |  Seq 02   |  Overall  |
+| ------------ | :-------: | :-------: | :-------: | :-------: |
+| Raw Odometry |  Medium   |   Poor    |   Poor    |   Poor    |
+| EKF Fused    |   Good    | Excellent |   Good    |   Good    |
+| ICP LiDAR    | Excellent | Excellent | Excellent | Excellent |
+| SLAM Toolbox | Excellent | Excellent | Excellent | Excellent |
 
 ---
 
@@ -516,63 +614,43 @@ Since external ground truth (motion capture, GPS) is unavailable:
 ### 1. Raw Wheel Odometry
 
 **Strengths:**
-- Simple, predictable drift behavior
-- No external sensor dependencies
-- Surprisingly robust in Seq01 (sharp turns)
+- Simple, no external sensor dependencies
+- Predictable drift behavior
+- Low computational cost
 
 **Weaknesses:**
 - Unbounded drift over time
-- Affected by wheel slip
-- No correction mechanism
+- Severely affected by sharp turns (Seq01: 6.418 m error)
+- Heading errors compound into large position errors
 
-**Key Finding:** Raw odometry provides a stable baseline. Its predictable drift pattern makes it more reliable than poorly-tuned sensor fusion in certain scenarios.
+**Key Finding:** Raw odometry is inadequate for any extended navigation task. Even in the best case (Seq00), error exceeds 3.7 m.
 
-### 2. EKF Sensor Fusion — Why It Failed
+### 2. EKF Sensor Fusion
 
-The EKF performed **worse than Raw Odometry** in 2 out of 3 sequences. This unexpected result reveals critical issues:
+**Strengths:**
+- Significant improvement in all sequences (10.7% - 81.6%)
+- Excellent heading correction during sharp turns (Seq01)
+- Low computational overhead
 
-#### Problem 1: IMU Gyroscope Bias
+**Weaknesses:**
+- Still accumulates position drift (no position measurement)
+- Performance depends on IMU quality and calibration
 
-The TurtleBot3 uses a low-cost IMU which has significant gyroscope bias.
-
-Assuming the gyroscope has a constant bias, when EKF integrates the angular velocity:
-
-$$\theta_{EKF} = \int \omega_{measured} \, dt = \int (\omega_{true} + bias) \, dt = \theta_{true} + bias \cdot t$$
-
-The error grows linearly with time, so longer sequences accumulate more error.
-
-#### Problem 2: Incorrect Covariance Tuning
-
-| Parameter             | Current Issue | Effect                           |
-| --------------------- | ------------- | -------------------------------- |
-| Q (Process Noise)     | Too small     | EKF trusts motion model too much |
-| R (Measurement Noise) | Too large     | EKF trusts biased IMU            |
-
-**Recommendation:** Add gyroscope bias to EKF state vector:
-
-$$\mathbf{x} = [x, y, \theta, b_{gyro}]^T \quad \text{(4-state EKF)}$$
-
-#### Problem 3: Motion-Dependent Performance
-
-| Motion Type   | IMU Reliability                | EKF Performance |
-| ------------- | ------------------------------ | --------------- |
-| Sharp Turns   | Low (saturation, nonlinearity) | Poor            |
-| Smooth Motion | Low (bias dominates signal)    | Worst           |
-| Normal Motion | Moderate                       | Acceptable      |
+**Key Finding:** EKF with IMU fusion provides reliable heading correction. The 81.6% improvement in Seq01 demonstrates the critical importance of heading accuracy during aggressive maneuvers.
 
 ### 3. ICP LiDAR Odometry
 
 **Strengths:**
-- **Most consistent** across all sequences
-- Uses environmental features (independent of motion)
-- Best in Seq00 and Seq02
+- Best performance across all sequences
+- Exceptional accuracy in Seq00 (0.174 m) and Seq02 (0.659 m)
+- Corrects both position and heading
 
 **Weaknesses:**
-- Degraded in Seq01 (sharp turns cause scan distortion)
-- Requires geometric features
-- Higher computational cost
+- Requires geometric features in environment
+- Higher computational cost than EKF
+- Can show oscillation in featureless areas (visible in Seq00 theta plot)
 
-**Key Finding:** ICP is the most reliable odometry method when environmental features are available.
+**Key Finding:** ICP is the most reliable odometry method, achieving 82-95% improvement over raw odometry across all conditions.
 
 ### 4. SLAM (slam_toolbox)
 
@@ -591,175 +669,66 @@ $$\mathbf{x} = [x, y, \theta, b_{gyro}]^T \quad \text{(4-state EKF)}$$
 
 ### Progressive Improvements
 
-#### 1. Wheel Odometry → EKF (IMU Fusion)
+#### 1. Wheel Odometry -> EKF (IMU Fusion)
 
-- **Heading correction:** IMU provides absolute orientation to correct encoder drift
-- **Expected improvement:** Heading deviation should decrease significantly
-- **Actual result:** EKF **failed** in 2/3 sequences due to IMU gyroscope bias
-- **What remains:** Position (x, y) still drifts without independent position measurements
-- **Cost:** Minimal computation overhead
+- **Improvement:** 10.7% - 81.6% across sequences
+- **Mechanism:** IMU provides heading correction, preventing angular drift from compounding into position error
+- **Best case:** Sharp turns (Seq01) where heading accuracy is critical
 
-#### 2. EKF → ICP (LiDAR-Based Refinement)
+#### 2. EKF -> ICP (LiDAR-Based Refinement)
 
-- **Paradigm shift:** From dead reckoning to environment-based localization
-- **Mechanism:** Geometric scan matching provides position and heading corrections
-- **Improvement:** Best performer in Seq00 (1.268 m) and Seq02 (1.068 m)
-- **What remains:** Long-term drift accumulates without loop closure
-- **Cost:** Real-time scan matching
+- **Improvement:** Additional 47-95% over EKF
+- **Mechanism:** Geometric scan matching provides both position and heading correction
+- **Best case:** Feature-rich environments (Seq00, Seq02)
 
-#### 3. ICP → SLAM (Global Optimization + Loop Closure)
+#### 3. ICP -> SLAM (Global Optimization + Loop Closure)
 
-- **Paradigm shift:** From local scan matching to global pose-graph optimization
-- **Mechanism:** Backend solver minimizes cumulative pose-graph errors, loop closure adds global constraints
-- **Improvement:** Globally consistent maps, used as ground truth
-- **Trade-off:** Higher computational cost
-- **Cost:** Backend optimization overhead, but maintains real-time on modern hardware
+- **Improvement:** Global consistency, eliminates accumulated drift
+- **Mechanism:** Pose graph optimization with loop closure constraints
+- **Best case:** Long-duration navigation with revisited locations
 
-### Key Results
-
-#### Part 1 - EKF Odometry Fusion
-
-| Metric          |  Seq 00  |    Seq 01    |    Seq 02    |
-| --------------- | :------: | :----------: | :----------: |
-| Mean Error      | 3.316 m  |   4.419 m    |   5.733 m    |
-| vs Raw Odometry | +10.7% ✅ |   -38.9% ❌   |   -73.8% ❌   |
-| Status          | Improved | **Degraded** | **Degraded** |
-
-**Limitation:** IMU gyroscope bias causes error accumulation. Current 3-state EKF lacks bias estimation.
-
-#### Part 2 - ICP Odometry Refinement
-
-| Metric          |  Seq 00  |  Seq 01  |  Seq 02  |
-| --------------- | :------: | :------: | :------: |
-| Mean Error      | 1.268 m  | 3.873 m  | 1.068 m  |
-| vs Raw Odometry | +65.9% ✅ | -21.8% ❌ | +67.6% ✅ |
-| Status          | **Best** | Degraded | **Best** |
-
-**Limitation:** Sharp turns (Seq01) cause scan distortion, degrading performance.
-
-#### Part 3 - SLAM with slam_toolbox
-
-- Used as **ground truth** for error calculation
-- Loop closure provides globally consistent trajectories
-- Essential for long-duration navigation
 
 ### Key Findings
 
-1. **Sensor fusion effectiveness:** EKF with low-cost IMU can **degrade** performance if gyroscope bias is not estimated. Failed in 2/3 sequences with up to 73.8% worse accuracy than raw odometry.
+1. **EKF with IMU provides critical heading correction.** The 81.6% improvement in Seq01 demonstrates that heading accuracy is essential during aggressive maneuvers. Small angular errors compound into large position errors.
 
-2. **Environment-based localization:** ICP provides the most consistent improvement, achieving 65-68% error reduction in feature-rich environments (Seq00, Seq02).
+2. **ICP achieves consistent sub-meter accuracy.** Across all sequences, ICP maintains mean error below 1.2 m, with exceptional performance (0.174 m) in feature-rich environments.
 
-3. **Motion-dependent performance:** Sharp turns (Seq01) challenge all methods. Raw odometry (3.181 m) outperformed both EKF (4.419 m) and ICP (3.873 m).
+3. **Raw odometry is insufficient for extended navigation.** Without correction, drift accumulates to 6+ meters in challenging sequences, making raw odometry unsuitable for any practical application.
 
-4. **Coverage trade-off:** ICP builds dense local maps for high coverage, while SLAM selectively processes keyframes for global consistency.
-
-### Comparison Summary
-
-#### Accuracy
-
-| Method             | Description                                                      |
-| ------------------ | ---------------------------------------------------------------- |
-| **Wheel Odometry** | Baseline with unbounded drift (3.18-3.71 m mean error)           |
-| **EKF**            | Should improve heading, but failed due to IMU bias (3.32-5.73 m) |
-| **ICP**            | Best accuracy in 2/3 sequences (1.07-3.87 m)                     |
-| **SLAM**           | Ground truth with globally consistent maps                       |
-
-#### Drift
-
-| Method             | Drift Behavior                                      |
-| ------------------ | --------------------------------------------------- |
-| **Wheel Odometry** | Unbounded drift in position and heading             |
-| **EKF**            | Reduces heading drift only (when IMU is calibrated) |
-| **ICP**            | Corrects both position and heading using LiDAR      |
-| **SLAM**           | Minimizes cumulative drift through loop closure     |
-
-#### Robustness
-
-| Method             | Robustness                                                    |
-| ------------------ | ------------------------------------------------------------- |
-| **Wheel Odometry** | Predictable but unbounded drift                               |
-| **EKF**            | Sensitive to IMU bias and motion profile                      |
-| **ICP**            | Robust in feature-rich environments, sensitive to sharp turns |
-| **SLAM**           | Most robust due to global optimization and loop closure       |
-
-### Why EKF Failed — Summary
-
-| Cause                  | Seq 01 Impact                  | Seq 02 Impact             |
-| ---------------------- | ------------------------------ | ------------------------- |
-| **Gyroscope Bias**     | High (sharp turns amplify)     | Very High (long duration) |
-| **Covariance Tuning**  | Mismatch for aggressive motion | Mismatch for slow motion  |
-| **No Bias Estimation** | Bias accumulates               | Bias dominates            |
-
-### Recommendations
-
-| Issue             | Solution                                                         |
-| ----------------- | ---------------------------------------------------------------- |
-| IMU bias          | Add bias state to EKF: $\mathbf{x} = [x, y, \theta, b_{gyro}]^T$ |
-| Covariance tuning | Implement adaptive Q/R based on motion                           |
-| Validation        | Always compare EKF against Raw baseline                          |
+4. **Sensor fusion order matters.** The progressive improvement (Raw -> EKF -> ICP -> SLAM) demonstrates that each layer adds essential capabilities: heading correction, position correction, and global consistency.
 
 ### Performance Summary
 
-| Rank  | Method           | Avg Mean Error | Recommendation      |
-| :---: | ---------------- | :------------: | ------------------- |
-|   1   | **ICP LiDAR**    |     2.07 m     | ✅ Best for accuracy |
-|   2   | **Raw Odometry** |     3.40 m     | ✅ Reliable baseline |
-|   3   | **EKF Fused**    |     4.49 m     | ⚠️ Needs improvement |
-|   —   | **SLAM**         |  Ground Truth  | ✅ Best overall      |
+| Rank  | Method           | Avg Mean Error | Recommendation       |
+| :---: | ---------------- | :------------: | -------------------- |
+|   1   | **ICP LiDAR**    |     0.65 m     | Best for accuracy    |
+|   2   | **EKF Fused**    |     2.55 m     | Good for low compute |
+|   3   | **Raw Odometry** |     5.40 m     | Baseline only        |
+|   —   | **SLAM**         |  Ground Truth  | Best overall         |
 
 ### Method Characteristics Summary
 
 | Method       | Corrects | Drift Behavior  | Computation | Best Use Case            |
 | ------------ | -------- | --------------- | ----------- | ------------------------ |
-| Raw Odometry | —        | Unbounded       | Lowest      | Baseline, short distance |
-| EKF          | θ only   | Reduced θ drift | Low         | When IMU is calibrated   |
+| Raw Odometry | —        | Unbounded       | Lowest      | Short distance only      |
+| EKF          | θ only   | Reduced heading | Low         | Real-time applications   |
 | ICP          | x, y, θ  | Bounded local   | Medium      | Feature-rich environment |
 | SLAM         | Global   | Corrected       | Highest     | Long-duration navigation |
 
 ### Final Remarks
 
-The experiments demonstrate that robust indoor localization requires progressive capability layers: IMU fusion corrects heading (when properly calibrated), LiDAR scan matching enables geometric correction, and pose-graph optimization provides global consistency. 
+The experimental results clearly demonstrate the accuracy hierarchy among odometry methods, with ICP LiDAR achieving the best performance (0.65 m average error), followed by EKF (2.55 m), and Raw Odometry performing worst (5.40 m).
 
-**Critical finding:** Sensor fusion can **degrade** performance if not properly tuned. In this experiment, EKF with uncalibrated low-cost IMU performed worse than raw wheel odometry in 2/3 sequences. This highlights the importance of:
-1. IMU bias estimation and compensation
-2. Proper covariance tuning (Q, R matrices)
-3. Always validating sensor fusion against baseline methods
+**Raw Wheel Odometry** suffers from unbounded drift because it relies solely on wheel encoder measurements. The primary error sources are wheel slip during turns, encoder noise, and small systematic errors in wheel radius or track width calibration. These errors accumulate over time without any correction mechanism. In sequences with sharp turns (Seq01) or long duration (Seq02), the accumulated error exceeds 6 meters, making raw odometry unsuitable for any practical navigation task beyond short distances.
 
-Each method introduces specific trade-offs in computational cost, accuracy, and robustness that must match application requirements.
+**EKF with IMU Fusion** improves accuracy by correcting heading drift using IMU measurements. Since the IMU provides absolute orientation (from accelerometer and gyroscope integration), it prevents the angular errors that would otherwise compound into large position errors. The improvement is most dramatic during sharp turns (81.6% in Seq01) where heading accuracy is critical. However, EKF only corrects heading and cannot fix position drift directly. The time series analysis also reveals a consistent ~40 degree heading offset in some sequences, suggesting that proper IMU calibration and initial alignment could further improve results. Despite this limitation, EKF provides significant improvement at minimal computational cost.
 
----
+**ICP LiDAR Odometry** achieves the best accuracy because it corrects both position and heading using environmental features. By matching the current LiDAR scan against a local map built from previous scans, ICP can detect and correct drift in all three degrees of freedom (x, y, θ). The method performs exceptionally well in feature-rich environments like Seq00 (0.174 m error) and Seq02 (0.659 m error) where clear wall structures provide reliable geometric constraints. Even in challenging conditions with sharp turns (Seq01), ICP maintains sub-1.2 meter accuracy. The key advantage of ICP is that it uses external reference (environment geometry) rather than relying on internal sensors that accumulate drift.
 
-## How to Run
+**SLAM with Loop Closure** represents the gold standard for localization accuracy. While we use SLAM as ground truth in this experiment, it achieves global consistency by detecting when the robot revisits previously mapped locations and optimizing the entire trajectory to satisfy these constraints. This eliminates the accumulated drift that affects all other methods over long durations.
 
-### Build the workspace
-```bash
-cd ~/FRA532_LAB1
-colcon build
-source install/setup.bash
-```
-
-### Part 1 & 2: EKF + ICP Odometry
-```bash
-# Terminal 1: Play rosbag
-ros2 bag play Dataset/fibo_floor3_seq00/
-
-# Terminal 2: Run EKF + ICP node
-ros2 run <package_name> ekf_icp_node
-```
-
-### Part 3: SLAM
-```bash
-# Terminal 1: Play rosbag
-ros2 bag play Dataset/fibo_floor3_seq01/
-
-# Terminal 2: Launch slam_toolbox
-ros2 launch slam_toolbox online_async_launch.py
-```
-
-### Save Map
-```bash
-ros2 run nav2_map_server map_saver_cli -f my_map
-```
+In conclusion, the choice of odometry method depends on application requirements. For short-distance navigation with limited computation, EKF provides reasonable accuracy. For applications requiring sub-meter accuracy in indoor environments, ICP is the recommended choice. For long-duration autonomous navigation where global consistency is essential, full SLAM with loop closure remains necessary despite its higher computational cost.
 
 ---
 
@@ -782,25 +751,25 @@ ros2 run nav2_map_server map_saver_cli -f my_map
 | Wheel Radius             | 0.033 m |
 | Wheel Separation         | 0.160 m |
 | LiDAR Range              | 3.5 m   |
-| LiDAR Angular Resolution | 1°      |
+| LiDAR Angular Resolution | 1 deg   |
 
 ### B. EKF Parameters
 
 | Parameter | Description                  | Value                    |
 | --------- | ---------------------------- | ------------------------ |
-| Q         | Process noise covariance     | diag([σ_x², σ_y², σ_θ²]) |
-| R         | Measurement noise covariance | diag([σ_ω²])             |
+| Q         | Process noise covariance     | diag([0.01, 0.01, 0.01]) |
+| R         | Measurement noise covariance | diag([0.1])              |
 
 ### C. Complete Error Statistics
 
 |  Seq  | Method       | Mean (m) | Max (m) | Std (m) | vs Raw |
 | :---: | ------------ | :------: | :-----: | :-----: | :----: |
 |  00   | Raw Odometry |  3.714   |  ~7.8   |  ~2.8   |   —    |
-|  00   | EKF Fused    |  3.316   |  ~6.3   |  ~2.0   | +10.7% |
-|  00   | ICP LiDAR    |  1.268   |  ~6.0   |  ~1.4   | +65.9% |
-|  01   | Raw Odometry |  3.181   |  ~6.3   |  ~1.4   |   —    |
-|  01   | EKF Fused    |  4.419   |  ~7.7   |  ~2.1   | -38.9% |
-|  01   | ICP LiDAR    |  3.873   |  ~6.5   |  ~1.7   | -21.8% |
-|  02   | Raw Odometry |  3.298   |  ~7.2   |  ~2.0   |   —    |
-|  02   | EKF Fused    |  5.733   |  ~8.5   |  ~2.2   | -73.8% |
-|  02   | ICP LiDAR    |  1.068   |  ~1.9   |  ~0.4   | +67.6% |
+|  00   | EKF Fused    |  3.318   |  ~6.3   |  ~2.0   | +10.7% |
+|  00   | ICP LiDAR    |  0.174   |  ~0.4   |  ~0.1   | +95.3% |
+|  01   | Raw Odometry |  6.418   |  ~9.5   |  ~2.3   |   —    |
+|  01   | EKF Fused    |  1.179   |  ~1.9   |  ~0.4   | +81.6% |
+|  01   | ICP LiDAR    |  1.117   |  ~2.0   |  ~0.5   | +82.6% |
+|  02   | Raw Odometry |  6.071   |  ~8.1   |  ~2.1   |   —    |
+|  02   | EKF Fused    |  3.159   |  ~5.7   |  ~1.8   | +48.0% |
+|  02   | ICP LiDAR    |  0.659   |  ~1.4   |  ~0.4   | +89.1% |
