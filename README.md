@@ -70,7 +70,7 @@ git clone https://github.com/natthaphxt/FRA532-Mobile-Robot.git -b Lab1
 
 ### Build the workspace
 ```bash
-cd ~/FRA532_LAB1
+cd ~/FRA532-Mobile-Robot
 colcon build
 source install/setup.bash
 ```
