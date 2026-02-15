@@ -42,7 +42,7 @@ This lab implements a complete 2D mobile robot localization pipeline:
 ```
 FRA532_LAB1/
 │
-├── src/                        # Source code
+├── src/                       # Source code
 │   ├── ekf_node.py            # Part 1: EKF implementation
 │   ├── icp_node.py            # Part 2: ICP scan matching
 │   └── ...
@@ -52,9 +52,9 @@ FRA532_LAB1/
 │   ├── fibo_floor3_seq01/     # Dataset: Sharp turns
 │   └── fibo_floor3_seq02/     # Dataset: Smooth motion
 │
-├── seq0/                       # Results: Sequence 00
-├── seq1/                       # Results: Sequence 01
-├── seq2/                       # Results: Sequence 02
+├── seq0/                      # Results: Sequence 00
+├── seq1/                      # Results: Sequence 01
+├── seq2/                      # Results: Sequence 02
 │
 ├── README.md
 └── .gitignore
