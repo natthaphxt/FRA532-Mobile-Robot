@@ -1,0 +1,90 @@
+# SLAM Toolbox Configuration - IMPROVED LOOP CLOSURE
+# Place this file at: ~/slam_config.yaml
+
+slam_toolbox:
+  ros__parameters:
+    # === Solver Parameters ===
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # === Frame Configuration ===
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link
+    scan_topic: /scan
+    
+    # === Mode ===
+    mode: mapping
+    
+    # === Map Settings ===
+    resolution: 0.05
+    max_laser_range: 20.0
+    
+    # === Motion Thresholds ===
+    minimum_travel_distance: 0.2
+    minimum_travel_heading: 0.2
+    minimum_time_interval: 0.5
+    
+    # === Transform Publishing ===
+    transform_publish_period: 0.02
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    
+    # === Scan Processing ===
+    throttle_scans: 1
+    scan_buffer_size: 10
+    scan_buffer_maximum_scan_distance: 10.0
+    
+    # === IMPROVED LOOP CLOSURE SETTINGS ===
+    do_loop_closing: true
+    
+    # Increase search distance for loop detection
+    loop_search_maximum_distance: 8.0  # Was 5.0 - search further
+    
+    # Relax matching thresholds to allow more loop closures
+    loop_match_minimum_chain_size: 5          # Was 10 - easier to trigger
+    loop_match_maximum_variance_coarse: 3.0   # Keep same
+    loop_match_minimum_response_coarse: 0.25  # Was 0.35 - more permissive
+    loop_match_minimum_response_fine: 0.35    # Was 0.45 - more permissive
+    
+    # === Correlation Parameters ===
+    correlation_search_space_dimension: 1.0
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+    
+    # === IMPROVED Loop Search Space ===
+    loop_search_space_dimension: 10.0   # Was 8.0 - larger search area
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+    
+    # === Scan Matcher Parameters ===
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 1.0
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    
+    # === Matching ===
+    use_scan_matching: true
+    use_scan_barycenter: true
+    use_response_expansion: true
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+    
+    # === Interactive Mode ===
+    enable_interactive_mode: true
+    
+    # === Debugging (ENABLE to see loop closure attempts) ===
+    debug_logging: true  # Changed to true for troubleshooting
+    
+    # === Map Updates ===
+    map_update_interval: 5.0
+    
+    # === Stack Size ===
+    stack_size_to_use: 40000000

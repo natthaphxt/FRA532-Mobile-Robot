@@ -1,0 +1,25 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/home/natthaphxt/carver_ws/install/scanmatcher/include/**",
+        "/home/natthaphxt/carver_ws/install/graph_based_slam/include/**",
+        "/home/natthaphxt/carver_ws/install/ndt_omp_ros2/include/**",
+        "/home/natthaphxt/carver_ws/install/lidarslam_msgs/include/**",
+        "/opt/ros/humble/include/**",
+        "/home/natthaphxt/FRA532-LAB1_6677/src/lab1/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ros2",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++17"
+    }
+  ],
+  "version": 4
+}
